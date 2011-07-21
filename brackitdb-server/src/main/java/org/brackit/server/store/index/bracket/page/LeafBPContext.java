@@ -38,6 +38,12 @@ import org.brackit.server.store.index.bracket.HintPageInformation;
 import org.brackit.server.store.index.bracket.IndexOperationException;
 import org.brackit.server.store.index.bracket.NavigationMode;
 import org.brackit.server.store.index.bracket.SubtreeDeleteListener;
+import org.brackit.server.store.index.bracket.log.BracketIndexLogOperation;
+import org.brackit.server.store.index.bracket.log.HighkeyLogOperation;
+import org.brackit.server.store.index.bracket.log.NodeSequenceLogOperation;
+import org.brackit.server.store.index.bracket.log.NodeSequenceLogOperation.ActionType;
+import org.brackit.server.store.index.bracket.log.PointerLogOperation;
+import org.brackit.server.store.index.bracket.log.PointerLogOperation.PointerField;
 import org.brackit.server.store.page.BasePage;
 import org.brackit.server.store.page.bracket.BracketKey;
 import org.brackit.server.store.page.bracket.BracketNodeSequence;
@@ -53,6 +59,7 @@ import org.brackit.server.store.page.bracket.ExternalValueLoader;
 import org.brackit.server.store.page.bracket.navigation.NavigationResult;
 import org.brackit.server.store.page.bracket.navigation.NavigationStatus;
 import org.brackit.server.tx.Tx;
+import org.brackit.server.tx.log.LogOperation;
 
 /**
  * @author Martin Hiller
@@ -137,7 +144,7 @@ public final class LeafBPContext extends AbstractBPContext implements Leaf {
 		}
 	}
 
-	private final BracketPage page;
+	protected final BracketPage page;
 
 	private int currentOffset;
 	private DeweyIDBuffer currentDeweyID;
@@ -212,14 +219,12 @@ public final class LeafBPContext extends AbstractBPContext implements Leaf {
 	@Override
 	public void setNextPageID(PageID nextPageID, boolean logged,
 			long undoNextLSN) throws IndexOperationException {
-		// LogOperation operation = null;
-		//
-		// if (logged)
-		// {
-		// operation =
-		// BlinkIndexLogOperationHelper.createrPointerLogOperation(BlinkIndexLogOperation.PREV_PAGE,
-		// getPageID(), getRootPageID(), getLowPageID(), prevPageID);
-		// }
+		LogOperation operation = null;
+
+		if (logged) {
+			operation = new PointerLogOperation(PointerField.NEXT, getPageID(),
+					getRootPageID(), getNextPageID(), nextPageID);
+		}
 
 		byte[] value = page.getHandle().page;
 		if (nextPageID != null) {
@@ -232,14 +237,11 @@ public final class LeafBPContext extends AbstractBPContext implements Leaf {
 
 		page.getHandle().setModified(true); // not covered by pageID to
 
-		// if (logged)
-		// {
-		// log(tx, operation, undoNextLSN);
-		// }
-		// else
-		// {
-		// page.getHandle().setAssignedTo(tx);
-		// }
+		if (logged) {
+			log(tx, operation, undoNextLSN);
+		} else {
+			page.getHandle().setAssignedTo(tx);
+		}
 	}
 
 	@Override
@@ -260,7 +262,7 @@ public final class LeafBPContext extends AbstractBPContext implements Leaf {
 
 	@Override
 	public byte[] getValue() throws IndexOperationException {
-		
+
 		if (CHECK_OFFSET_INTEGRITY) {
 			declareContextSensitive();
 		}
@@ -344,7 +346,7 @@ public final class LeafBPContext extends AbstractBPContext implements Leaf {
 		if (CHECK_OFFSET_INTEGRITY) {
 			declareContextSensitive();
 		}
-		
+
 		PageID oldExternalPageID = null;
 		byte[] oldValue = null;
 		try {
@@ -408,6 +410,18 @@ public final class LeafBPContext extends AbstractBPContext implements Leaf {
 			}
 			return false;
 		} else {
+			// insert successful
+
+			// log insert
+			if (logged) {
+				LogOperation operation = new NodeSequenceLogOperation(
+						ActionType.INSERT, getPageID(), getRootPageID(),
+						sequence);
+				log(tx, operation, undoNextLSN);
+			} else {
+				page.getHandle().setAssignedTo(tx);
+			}
+
 			setCurrentOffset(returnVal);
 			bufferedValue = record;
 			return true;
@@ -445,6 +459,18 @@ public final class LeafBPContext extends AbstractBPContext implements Leaf {
 			}
 			return false;
 		} else {
+			// insert successful
+
+			// log insert
+			if (logged) {
+				LogOperation operation = new NodeSequenceLogOperation(
+						ActionType.INSERT, getPageID(), getRootPageID(),
+						sequence);
+				log(tx, operation, undoNextLSN);
+			} else {
+				page.getHandle().setAssignedTo(tx);
+			}
+
 			setCurrentOffset(returnVal);
 			bufferedValue = record;
 			return true;
@@ -613,8 +639,8 @@ public final class LeafBPContext extends AbstractBPContext implements Leaf {
 
 			// set highKey/separator
 			XTCdeweyID highKey = this.getHighKey();
-			this.setHighKey(delPrep.startDeleteDeweyID);
-			rightPage.setHighKey(highKey);
+			this.setHighKey(delPrep.startDeleteDeweyID, logged, undoNextLSN);
+			rightPage.setHighKey(highKey, logged, undoNextLSN);
 
 			// insert nodes into right page
 			rightPage.page.insertSequenceAfter(nodes, rightPage.currentOffset,
@@ -697,21 +723,51 @@ public final class LeafBPContext extends AbstractBPContext implements Leaf {
 	}
 
 	@Override
-	public boolean setHighKey(XTCdeweyID highKey) {
+	public boolean setHighKey(XTCdeweyID highKey, boolean logged,
+			long undoNextLSN) throws IndexOperationException {
+
+		byte[] highKeyBytes = highKey.toBytes();
+		LogOperation operation = null;
+		if (logged) {
+			operation = new HighkeyLogOperation(getPageID(), getRootPageID(),
+					getHighKeyBytes(), highKeyBytes);
+		}
 
 		// store highkey as context data
-		return page.setContextData(highKey.toBytes());
+		if (!page.setContextData(highKeyBytes)) {
+			return false;
+		}
 
-		// if (!page.setContextData(highKey.toBytes())) {
-		// throw new RuntimeException(
-		// String.format(
-		// "Not enough space availabe to store the HighKey %s in leaf page %s!",
-		// highKey, page.getPageID()));
-		// }
+		if (logged) {
+			log(tx, operation, undoNextLSN);
+		} else {
+			page.getHandle().setAssignedTo(tx);
+		}
+
+		return true;
 	}
 
-	public boolean setHighKeyBytes(byte[] highKeyBytes) {
-		return page.setContextData(highKeyBytes);
+	public boolean setHighKeyBytes(byte[] highKeyBytes, boolean logged,
+			long undoNextLSN) throws IndexOperationException {
+
+		LogOperation operation = null;
+		if (logged) {
+			operation = new HighkeyLogOperation(getPageID(), getRootPageID(),
+					getHighKeyBytes(), highKeyBytes);
+		}
+
+		// store highkey as context data
+		if (!page.setContextData(highKeyBytes)) {
+			return false;
+		}
+
+		if (logged) {
+			log(tx, operation, undoNextLSN);
+		} else {
+			page.getHandle().setAssignedTo(tx);
+		}
+
+		return true;
 	}
 
 	@Override
@@ -962,11 +1018,12 @@ public final class LeafBPContext extends AbstractBPContext implements Leaf {
 			XTCdeweyID rightBorderDeweyID, boolean logged, long undoNextLSN)
 			throws IndexOperationException {
 
+		if (CHECK_OFFSET_INTEGRITY) {
+			declareContextFree();
+		}
+		initBuffer();
+
 		try {
-			if (CHECK_OFFSET_INTEGRITY) {
-				declareContextFree();
-			}
-			initBuffer();
 
 			// prepare deletion
 			DeleteSequencePreparation delPrep = page.deleteSequencePrepare(
@@ -974,11 +1031,24 @@ public final class LeafBPContext extends AbstractBPContext implements Leaf {
 
 			if (delPrep.deletePreparation == null
 					|| delPrep.deleteSequenceInfo.producesEmptyLeaf) {
-				// nothing to delete OR page needs to be unchained
+				// nothing to delete OR page needs to be unchained anyway
 			} else {
+				BracketNodeSequence nodes = page
+						.getBracketNodeSequence(delPrep.deletePreparation);
+
 				// delete
 				page.delete(delPrep.deletePreparation,
 						new ExternalValueLoaderImpl());
+
+				// log delete
+				if (logged) {
+					LogOperation operation = new NodeSequenceLogOperation(
+							ActionType.DELETE, getPageID(), getRootPageID(),
+							nodes);
+					log(tx, operation, undoNextLSN);
+				} else {
+					page.getHandle().setAssignedTo(tx);
+				}
 			}
 
 			return delPrep.deleteSequenceInfo;
@@ -1004,6 +1074,17 @@ public final class LeafBPContext extends AbstractBPContext implements Leaf {
 		} else if (returnVal == BracketPage.INSERTION_NO_SPACE) {
 			return false;
 		} else {
+			// insert successful
+
+			// log insert
+			if (logged) {
+				LogOperation operation = new NodeSequenceLogOperation(
+						ActionType.INSERT, getPageID(), getRootPageID(), nodes);
+				log(tx, operation, undoNextLSN);
+			} else {
+				page.getHandle().setAssignedTo(tx);
+			}
+
 			setCurrentOffset(returnVal);
 			return true;
 		}
@@ -1026,6 +1107,17 @@ public final class LeafBPContext extends AbstractBPContext implements Leaf {
 		} else if (returnVal == BracketPage.INSERTION_NO_SPACE) {
 			return false;
 		} else {
+			// insert successful
+
+			// log insert
+			if (logged) {
+				LogOperation operation = new NodeSequenceLogOperation(
+						ActionType.INSERT, getPageID(), getRootPageID(), nodes);
+				log(tx, operation, undoNextLSN);
+			} else {
+				page.getHandle().setAssignedTo(tx);
+			}
+
 			setCurrentOffset(returnVal);
 			return true;
 		}
@@ -1057,6 +1149,15 @@ public final class LeafBPContext extends AbstractBPContext implements Leaf {
 
 			// delete nodes from page
 			page.delete(delPrep, new ExternalValueLoaderImpl());
+
+			// log delete
+			if (logged) {
+				LogOperation operation = new NodeSequenceLogOperation(
+						ActionType.DELETE, getPageID(), getRootPageID(), nodes);
+				log(tx, operation, undoNextLSN);
+			} else {
+				page.getHandle().setAssignedTo(tx);
+			}
 
 			return nodes;
 
@@ -1124,5 +1225,10 @@ public final class LeafBPContext extends AbstractBPContext implements Leaf {
 		}
 
 		return navRes.status;
+	}
+
+	@Override
+	public boolean isCompressed() {
+		return true;
 	}
 }
