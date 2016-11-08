@@ -1,0 +1,13 @@
+brackitdb-server/target
+brackitdb-driver/target
+brackitdb-server/.settings$
+brackitdb-server/.classpath$
+brackitdb-server/.project$
+brackitdb-driver/.project$
+brackitdb-driver/.classpath$
+brackitdb-driver/.settings$
+\.project
+\.settings
+brackitdb-server/logfiles
+brackitdb-server/log$
+brackitdb-server/container$
