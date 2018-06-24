@@ -50,6 +50,7 @@ import org.brackit.server.xquery.DBCompileChain;
 import org.brackit.xquery.QueryException;
 import org.brackit.xquery.XQuery;
 import org.brackit.xquery.util.log.Logger;
+import org.brackit.xquery.util.serialize.SerializationHandler;
 
 /**
  * 
@@ -220,15 +221,16 @@ public class TCPConnector implements Runnable {
 
 				XQuery xq = new XQuery(new DBCompileChain(mdm, tx), query);
 				TXQueryContext ctx = new TXQueryContext(tx, mdm);
-				xq.serialize(ctx, new PrintStream(to));
+				xq.serialize(ctx, new SerializationHandler(new PrintStream(to)));
 
 				if (session.isAutoCommit()) {
 					session.commit();
 				}
 			} catch (Throwable e) {
+				e.printStackTrace();
 				log.error(e);
 				try {
-					if (session.isAutoCommit()) {
+					if (tx == null) {
 						session.rollback();
 					}
 				} catch (ServerException e1) {

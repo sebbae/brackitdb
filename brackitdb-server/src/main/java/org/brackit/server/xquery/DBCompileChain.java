@@ -32,6 +32,7 @@ import java.util.Map;
 import org.brackit.server.metadata.manager.MetaDataMgr;
 import org.brackit.server.tx.Tx;
 import org.brackit.server.xquery.compiler.optimizer.DBOptimizer;
+import org.brackit.server.xquery.compiler.translator.DBBlockTranslator;
 import org.brackit.server.xquery.compiler.translator.DBTranslator;
 import org.brackit.server.xquery.function.bdb.BDBFun;
 import org.brackit.server.xquery.function.xmark.XMarkFun;
@@ -68,7 +69,14 @@ public class DBCompileChain extends CompileChain {
 
 	@Override
 	protected Translator getTranslator(Map<QNm, Str> options) {
-		return new DBTranslator(options);
+		Str opt = options.get(PUSH_EVAL_OPTION);
+		boolean push = ((opt != null) && Boolean
+				.parseBoolean(opt.stringValue()));
+		if (push) {
+			return new DBBlockTranslator(options);
+		} else {
+			return new DBTranslator(options);
+		}
 	}
 
 	@Override
